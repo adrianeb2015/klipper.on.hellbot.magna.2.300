@@ -1,0 +1,44 @@
+#
+# deploy.yml
+#
+# Rebuild the bugfix-2.1.x branch whenever 'import-2.1.x' is pushed
+#
+
+name: Deploy
+
+on:
+  push:
+    branches:
+    - import-2.1.x
+    paths:
+      - 'config/**'
+      - 'bin/mfconfig'
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    if: github.repository == 'MarlinFirmware/Configurations'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+    - name: Check out
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        fetch-depth: 0  # Fetch all history for all branches and tags
+        token: ${{ secrets.GITHUB_TOKEN }}  # Use the built-in token for authentication
+
+    - name: Fetch all branches
+      run: git fetch --all
+
+    - name: Set up Git identity
+      run: |
+        git config --global user.email "github-actions@github.com"
+        git config --global user.name "GitHub Actions"
+
+    - name: Build bugfix-2.1.x
+      run: bin/mfconfig CI
+
+    - name: Push bugfix-2.1.x
+      run: git push -f origin WORK:bugfix-2.1.x
