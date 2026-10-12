@@ -1,0 +1,15 @@
+# PlatformIO / build artifacts
+.pio-home/
+.pio-workspace/
+.tools/
+out/
+*.o
+*.elf
+*.bin.bak
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
