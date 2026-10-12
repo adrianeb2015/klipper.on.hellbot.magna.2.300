@@ -1,6 +1,6 @@
-# Botones del TFT MKS de la Robin Nano (fork klipper-hellbot)
+# Buttons for the MKS TFT of the Robin Nano (klipper-hellbot fork)
 #
-# Configuracion en printer.cfg:
+# Configuration in printer.cfg:
 #
 # [hbtft_buttons]
 # btn1_label: HOME
@@ -9,29 +9,28 @@
 # btn2_gcode: M702
 # ...
 #
-# Los labels (max 16 caracteres, mayusculas) se dibujan en los botones
-# del TFT; al tocar un boton se ejecuta su gcode.
+# Labels (max 16 chars, displayed uppercase) are drawn on the TFT
+# buttons; tapping a button runs its gcode.
 #
-# MENUS / PAGINAS (solo host, sin recompilar el FW):
-#   - La pagina 1 son los btnN_* de arriba.
-#   - Paginas extra: pageN_btnM_label / pageN_btnM_gcode /
-#     pageN_btnM_color (ej. page2_btn1_label: HEAT).
-#   - Un boton con gcode "PAGE:2" cambia a la pagina 2; para volver,
-#     pon en la pagina 2 un boton con gcode "PAGE:1".
-#   - Tambien se puede cambiar por consola o macro: HBTFT_PAGE PAGE=2
+# MENUS / PAGES (host-only, no firmware rebuild):
+#   - Page 1 is the classic btnN_* set above.
+#   - Extra pages: pageN_btnM_label / pageN_btnM_gcode /
+#     pageN_btnM_color (e.g. page2_btn1_label: HEAT).
+#   - A button with gcode "PAGE:2" switches to page 2; to go back,
+#     put a button on page 2 with gcode "PAGE:1".
+#   - You can also switch from the console or a macro: HBTFT_PAGE PAGE=2
 #
-# Calibracion del touch (TODO en host, sin recompilar el firmware):
-# el MCU reporta coordenadas crudas del XPT2046 en el mensaje hb_button,
-# y este modulo las mapea con estos parametros:
+# TOUCH CALIBRATION (all in host, no firmware rebuild):
+# the MCU reports raw XPT2046 coordinates in the hb_button message,
+# and this module maps them using these parameters:
 #
-#   xpt_x_min / xpt_x_max : rango ADC crudo del eje X (tocar extremos y
-#       anotar los valores que aparecen en klippy.log: "mensaje recibido")
-#   xpt_y_min / xpt_y_max : idem eje Y
-#   flip_x / flip_y       : 1 si el eje va invertido
+#   xpt_x_min / xpt_x_max : raw ADC range of the X axis (tap the edges
+#       and note the values logged as "message received" in klippy.log)
+#   xpt_y_min / xpt_y_max : same for the Y axis
+#   flip_x / flip_y       : 1 if the axis is inverted
 #
-# Con el rango mal calibrado los botones igual funcionan si los tocas
-# cerca del centro del boton; ajusta min/max hasta que los bordes
-# respondan bien.
+# With a rough calibration the buttons still work when tapped near the
+# center; adjust min/max until the edges respond correctly.
 import logging
 
 
@@ -97,7 +96,7 @@ class HBTFTButtons:
             desc='Loguea toques del TFT con coordenadas crudas y mapeadas')
         self.gcode.register_command(
             'HBTFT_PAGE', self._cmd_hbtft_page,
-            desc='Cambia la pagina de botones del TFT (PAGE=N)')
+            desc='Switch the TFT button page (PAGE=N)')
 
     def _register_response(self):
         # Estrategia: registrar DIRECTO en serialhdl (mcu._serial), que es
@@ -152,12 +151,12 @@ class HBTFTButtons:
         labels, gcodes, colors = self.pages[self.page]
         for i, label in enumerate(labels):
             self.cmd_label.send([i] + self._pack(label) + [colors[i]])
-        logging.info('hbtft_buttons: pagina %d enviada (%s)', self.page,
+        logging.info('hbtft_buttons: page %d sent (%s)', self.page,
                      ', '.join(labels))
 
     def _set_page(self, page):
         if page not in self.pages:
-            logging.warning('hbtft_buttons: pagina %d no definida', page)
+            logging.warning('hbtft_buttons: page %d not defined', page)
             return
         self.page = page
         if self.cmd_label is not None:
@@ -166,7 +165,7 @@ class HBTFTButtons:
     def _cmd_hbtft_page(self, gcmd):
         page = gcmd.get_int('PAGE', 1, minval=1, maxval=99)
         self._set_page(page)
-        gcmd.respond_info('hbtft: pagina %d (%s)' % (
+        gcmd.respond_info('hbtft: page %d (%s)' % (
             self.page, ', '.join(self.pages[self.page][0])))
 
     def _handle_ready(self):
@@ -179,9 +178,9 @@ class HBTFTButtons:
             reg_ok = self._register_response()
             if not reg_ok:
                 logging.warning(
-                    'hbtft_buttons: no encontre la API de respuestas en esta '
-                    'version de klipper; los labels se dibujan pero los '
-                    'toques no ejecutan gcode')
+                    'hbtft_buttons: no response registration API found in this '
+                    'klipper version; labels are drawn but taps do not '
+                    'run gcode')
         except Exception:
             logging.exception('hbtft_buttons: init error')
 
@@ -234,7 +233,7 @@ class HBTFTButtons:
             if self.touch_debug:
                 logging.info(
                     'hbtft_buttons: TOUCH raw=(%s,%s) -> pixel=(%s,%s) '
-                    'boton=%s', params.get('x'), params.get('y'),
+                    'button=%s', params.get('x'), params.get('y'),
                     self._pixel_x(params.get('x')),
                     self._pixel_y(params.get('y')),
                     self._raw_to_button(params.get('x', 0),
@@ -245,8 +244,8 @@ class HBTFTButtons:
             raw_btn = self._raw_to_button(params.get('x', 0),
                                           params.get('y', 0))
             if raw_btn != btn:
-                logging.info('hbtft_buttons: MCU dijo btn=%s, calibracion '
-                             'host dice btn=%s (se usa la del host)',
+                logging.info('hbtft_buttons: MCU said btn=%s, host '
+                             'calibration says btn=%s (host wins)',
                              btn, raw_btn)
                 btn = raw_btn
             if btn > 5:
@@ -260,10 +259,10 @@ class HBTFTButtons:
                 try:
                     newpage = int(script.split(':', 1)[1].strip())
                 except ValueError:
-                    logging.warning('hbtft_buttons: PAGE invalido: %s',
+                    logging.warning('hbtft_buttons: invalid PAGE: %s',
                                     script)
                     return
-                logging.info('hbtft_buttons: btn%d -> pagina %d',
+                logging.info('hbtft_buttons: btn%d -> page %d',
                              btn + 1, newpage)
                 self.reactor.register_async_callback(
                     (lambda e, p=newpage: self._set_page(p)))
@@ -275,7 +274,7 @@ class HBTFTButtons:
             self.reactor.register_async_callback(
                 (lambda e, s=script: self._run_script(s)))
         except Exception:
-            logging.exception('hbtft_buttons: error en evento de boton')
+            logging.exception('hbtft_buttons: error in button event')
 
     def _run_script(self, script):
         try:

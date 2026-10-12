@@ -1,8 +1,8 @@
 # Hellbot Magna 2 300 — entorno Marlin (Dragonburner + Sherpa Mini)
 
-> 🔴 **¿Buscas Klipper con la pantalla TFT táctil original?** Mira la
-> **[Guía completa: Klipper + TFT + touch](klipper-hellbot/GUIA-KLIPPER-TFT.md)**
-> — firmware, instalación en la Pi y calibración del touch sin recompilar.
+> 🔴 **Klipper with the stock TFT touchscreen**: see the
+> **[Complete guide: Klipper + TFT + touch](klipper-hellbot/GUIDE-KLIPPER-TFT.md)**
+> — firmware build, Pi setup, and touch calibration without recompiling.
 
 Entorno completo para editar y compilar Marlin para la **Hellbot Magna 2 300**
 con placa **MKS Robin Nano V1.2**, convertido a hotend **Dragonburner** con
