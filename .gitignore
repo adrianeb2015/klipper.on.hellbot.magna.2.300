@@ -13,3 +13,8 @@ Thumbs.db
 *.swp
 .vscode/
 .idea/
+
+# Marlin environment (not needed for the Klipper build)
+marlin/
+mks-robin-nano/
+configurations/
