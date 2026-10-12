@@ -12,6 +12,14 @@
 # Los labels (max 16 caracteres, mayusculas) se dibujan en los botones
 # del TFT; al tocar un boton se ejecuta su gcode.
 #
+# MENUS / PAGINAS (solo host, sin recompilar el FW):
+#   - La pagina 1 son los btnN_* de arriba.
+#   - Paginas extra: pageN_btnM_label / pageN_btnM_gcode /
+#     pageN_btnM_color (ej. page2_btn1_label: HEAT).
+#   - Un boton con gcode "PAGE:2" cambia a la pagina 2; para volver,
+#     pon en la pagina 2 un boton con gcode "PAGE:1".
+#   - Tambien se puede cambiar por consola o macro: HBTFT_PAGE PAGE=2
+#
 # Calibracion del touch (TODO en host, sin recompilar el firmware):
 # el MCU reporta coordenadas crudas del XPT2046 en el mensaje hb_button,
 # y este modulo las mapea con estos parametros:
@@ -41,6 +49,29 @@ class HBTFTButtons:
             self.gcodes.append(config.get('btn%d_gcode' % (i + 1), ''))
             self.colors.append(self._rgb565(
                 config.get('btn%d_color' % (i + 1), None)))
+        # Sistema de paginas / menus: la pagina 1 son los btnN_* clasicos.
+        # Paginas extra: pageN_btnM_label/gcode/color en printer.cfg.
+        # Un boton cuyo gcode es "PAGE:N" cambia a la pagina N (el host
+        # reenvia los 6 hb_label y el TFT se redibuja solo).
+        self.pages = {1: list(zip(self.labels, self.gcodes, self.colors))}
+        self.page = 1
+        options = config.get_prefix_options('page')
+        extra_pages = set()
+        for opt in options:
+            try:
+                extra_pages.add(int(opt.split('_')[0][4:]))
+            except ValueError:
+                pass
+        for p in sorted(extra_pages):
+            entries = []
+            for i in range(6):
+                entries.append((
+                    config.get('page%d_btn%d_label' % (p, i + 1),
+                               'BTN%d' % (i + 1)).upper()[:16],
+                    config.get('page%d_btn%d_gcode' % (p, i + 1), ''),
+                    self._rgb565(config.get(
+                        'page%d_btn%d_color' % (p, i + 1), None))))
+            self.pages[p] = entries
         # Calibracion touch (mapeo crudo->pantalla hecho aqui, en host)
         self.xpt_x_min = config.getint('xpt_x_min', 150)
         self.xpt_x_max = config.getint('xpt_x_max', 1850)
@@ -64,6 +95,9 @@ class HBTFTButtons:
         self.gcode.register_command(
             'HBTFT_TOUCH_DEBUG', self._cmd_touch_debug,
             desc='Loguea toques del TFT con coordenadas crudas y mapeadas')
+        self.gcode.register_command(
+            'HBTFT_PAGE', self._cmd_hbtft_page,
+            desc='Cambia la pagina de botones del TFT (PAGE=N)')
 
     def _register_response(self):
         # Estrategia: registrar DIRECTO en serialhdl (mcu._serial), que es
@@ -112,14 +146,36 @@ class HBTFTButtons:
         gcmd.respond_info('hbtft touch debug: %s' % (
             'ON' if self.touch_debug else 'OFF'))
 
+    def _send_labels(self):
+        # Envia los 6 labels/gcodes/colores de la pagina actual al MCU
+        # (el firmware redibuja cada boton al recibir hb_label)
+        labels, gcodes, colors = self.pages[self.page]
+        for i, label in enumerate(labels):
+            self.cmd_label.send([i] + self._pack(label) + [colors[i]])
+        logging.info('hbtft_buttons: pagina %d enviada (%s)', self.page,
+                     ', '.join(labels))
+
+    def _set_page(self, page):
+        if page not in self.pages:
+            logging.warning('hbtft_buttons: pagina %d no definida', page)
+            return
+        self.page = page
+        if self.cmd_label is not None:
+            self._send_labels()
+
+    def _cmd_hbtft_page(self, gcmd):
+        page = gcmd.get_int('PAGE', 1, minval=1, maxval=99)
+        self._set_page(page)
+        gcmd.respond_info('hbtft: pagina %d (%s)' % (
+            self.page, ', '.join(self.pages[self.page][0])))
+
     def _handle_ready(self):
         try:
             self.mcu = self.printer.lookup_object('mcu')
             self.cmd_label = self.mcu.lookup_command(
                 'hb_label idx=%u w0=%u w1=%u w2=%u w3=%u color=%u')
-            for i, label in enumerate(self.labels):
-                self.cmd_label.send(
-                    [i] + self._pack(label) + [self.colors[i]])
+            self.page = 1
+            self._send_labels()
             reg_ok = self._register_response()
             if not reg_ok:
                 logging.warning(
@@ -195,11 +251,25 @@ class HBTFTButtons:
                 btn = raw_btn
             if btn > 5:
                 return
-            script = self.gcodes[btn]
+            labels, gcodes, colors = self.pages[self.page]
+            script = gcodes[btn]
             if not script:
                 return
+            # Gcode especial: cambiar de pagina de menu
+            if script.strip().upper().startswith('PAGE:'):
+                try:
+                    newpage = int(script.split(':', 1)[1].strip())
+                except ValueError:
+                    logging.warning('hbtft_buttons: PAGE invalido: %s',
+                                    script)
+                    return
+                logging.info('hbtft_buttons: btn%d -> pagina %d',
+                             btn + 1, newpage)
+                self.reactor.register_async_callback(
+                    (lambda e, p=newpage: self._set_page(p)))
+                return
             logging.info('hbtft_buttons: btn%d (%s) -> %s',
-                         btn + 1, self.labels[btn], script)
+                         btn + 1, labels[btn], script)
             # El callback de serie corre en el thread de fondo: agendar en
             # el reactor con register_async_callback (patron de [buttons])
             self.reactor.register_async_callback(
