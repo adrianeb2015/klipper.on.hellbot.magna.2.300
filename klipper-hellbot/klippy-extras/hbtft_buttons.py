@@ -11,6 +11,19 @@
 #
 # Los labels (max 16 caracteres, mayusculas) se dibujan en los botones
 # del TFT; al tocar un boton se ejecuta su gcode.
+#
+# Calibracion del touch (TODO en host, sin recompilar el firmware):
+# el MCU reporta coordenadas crudas del XPT2046 en el mensaje hb_button,
+# y este modulo las mapea con estos parametros:
+#
+#   xpt_x_min / xpt_x_max : rango ADC crudo del eje X (tocar extremos y
+#       anotar los valores que aparecen en klippy.log: "mensaje recibido")
+#   xpt_y_min / xpt_y_max : idem eje Y
+#   flip_x / flip_y       : 1 si el eje va invertido
+#
+# Con el rango mal calibrado los botones igual funcionan si los tocas
+# cerca del centro del boton; ajusta min/max hasta que los bordes
+# respondan bien.
 import logging
 
 
@@ -28,12 +41,29 @@ class HBTFTButtons:
             self.gcodes.append(config.get('btn%d_gcode' % (i + 1), ''))
             self.colors.append(self._rgb565(
                 config.get('btn%d_color' % (i + 1), None)))
+        # Calibracion touch (mapeo crudo->pantalla hecho aqui, en host)
+        self.xpt_x_min = config.getint('xpt_x_min', 150)
+        self.xpt_x_max = config.getint('xpt_x_max', 1850)
+        self.xpt_y_min = config.getint('xpt_y_min', 220)
+        self.xpt_y_max = config.getint('xpt_y_max', 1830)
+        self.flip_x = config.getboolean('flip_x', False)
+        self.flip_y = config.getboolean('flip_y', True)
+        # Grilla de botones (3 columnas x 2 filas), misma del firmware
+        self.cols = config.getint('cols', 3, minval=1, maxval=4)
+        self.rows = config.getint('rows', 2, minval=1, maxval=3)
         self.mcu = None
         self.cmd_label = None
         self._resp_wrapper = None
+        self.touch_debug = False
+        # Resolucion del panel (MKS TFT35 ILI9488, landscape)
+        self.tft_w = config.getint('tft_width', 480)
+        self.tft_h = config.getint('tft_height', 320)
         self.printer.register_event_handler('klippy:ready', self._handle_ready)
         self.printer.register_event_handler(
             'klippy:disconnect', self._handle_disconnect)
+        self.gcode.register_command(
+            'HBTFT_TOUCH_DEBUG', self._cmd_touch_debug,
+            desc='Loguea toques del TFT con coordenadas crudas y mapeadas')
 
     def _register_response(self):
         # Estrategia: registrar DIRECTO en serialhdl (mcu._serial), que es
@@ -64,6 +94,23 @@ class HBTFTButtons:
                 return True
         logging.warning('hbtft_buttons: NINGUNA ruta de registro disponible')
         return False
+
+    def _pixel_x(self, raw):
+        v = max(self.xpt_x_min, min(self.xpt_x_max, raw))
+        px = (v - self.xpt_x_min) * self.tft_w // (
+            self.xpt_x_max - self.xpt_x_min)
+        return self.tft_w - px if self.flip_x else px
+
+    def _pixel_y(self, raw):
+        v = max(self.xpt_y_min, min(self.xpt_y_max, raw))
+        py = (v - self.xpt_y_min) * self.tft_h // (
+            self.xpt_y_max - self.xpt_y_min)
+        return self.tft_h - py if self.flip_y else py
+
+    def _cmd_touch_debug(self, gcmd):
+        self.touch_debug = not self.touch_debug
+        gcmd.respond_info('hbtft touch debug: %s' % (
+            'ON' if self.touch_debug else 'OFF'))
 
     def _handle_ready(self):
         try:
@@ -108,10 +155,44 @@ class HBTFTButtons:
         self.mcu = None
         self.cmd_label = None
 
+    def _raw_to_button(self, rx, ry):
+        # Mapea coordenadas crudas del XPT2046 a indice de boton (0-5)
+        # usando la calibracion de printer.cfg. Espejo exacto de
+        # xpt_map_x/xpt_map_y del firmware, pero sin recompilar.
+        def norm(v, lo, hi):
+            v = max(lo, min(hi, v))
+            return (v - lo) / float(hi - lo)
+        nx = norm(rx, self.xpt_x_min, self.xpt_x_max)
+        ny = norm(ry, self.xpt_y_min, self.xpt_y_max)
+        if self.flip_x:
+            nx = 1.0 - nx
+        if self.flip_y:
+            ny = 1.0 - ny
+        col = min(self.cols - 1, int(nx * self.cols))
+        row = min(self.rows - 1, int(ny * self.rows))
+        return row * self.cols + col
+
     def _handle_button(self, params):
         try:
             logging.info('hbtft_buttons: mensaje recibido %s', params)
+            if self.touch_debug:
+                logging.info(
+                    'hbtft_buttons: TOUCH raw=(%s,%s) -> pixel=(%s,%s) '
+                    'boton=%s', params.get('x'), params.get('y'),
+                    self._pixel_x(params.get('x')),
+                    self._pixel_y(params.get('y')),
+                    self._raw_to_button(params.get('x', 0),
+                                        params.get('y', 0)))
             btn = params.get('btn', 255)
+            # La calibracion del host manda: si el MCU y el host no
+            # concuerdan (fw sin calibrar), usamos el mapeo del host
+            raw_btn = self._raw_to_button(params.get('x', 0),
+                                          params.get('y', 0))
+            if raw_btn != btn:
+                logging.info('hbtft_buttons: MCU dijo btn=%s, calibracion '
+                             'host dice btn=%s (se usa la del host)',
+                             btn, raw_btn)
+                btn = raw_btn
             if btn > 5:
                 return
             script = self.gcodes[btn]
