@@ -44,8 +44,8 @@ class HBTFTButtons:
         self.gcodes = []
         self.colors = []
         for i in range(6):
-            self.labels.append(config.get(
-                'btn%d_label' % (i + 1), 'BTN%d' % (i + 1)).upper()[:16])
+            self.labels.append(
+                config.get('btn%d_label' % (i + 1), 'BTN%d' % (i + 1)))
             self.gcodes.append(config.get('btn%d_gcode' % (i + 1), ''))
             self.colors.append(self._rgb565(
                 config.get('btn%d_color' % (i + 1), None)))
@@ -67,7 +67,7 @@ class HBTFTButtons:
             for i in range(6):
                 entries.append((
                     config.get('page%d_btn%d_label' % (p, i + 1),
-                               'BTN%d' % (i + 1)).upper()[:16],
+                               'BTN%d' % (i + 1)),
                     config.get('page%d_btn%d_gcode' % (p, i + 1), ''),
                     self._rgb565(config.get(
                         'page%d_btn%d_color' % (p, i + 1), None))))
