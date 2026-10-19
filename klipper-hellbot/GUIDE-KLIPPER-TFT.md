@@ -219,6 +219,26 @@ Or globally with `big_font: True` under `[hbtft_buttons]`. Requires the
 `hb_label2` firmware from this fork (older firmware silently falls back to
 single-line labels).
 
+### Button icons (built into the firmware)
+
+Eight monochrome icons (16×16 drawn at 2× = 32×32 px, in the button color)
+are compiled into the firmware — zero protocol traffic, instant drawing:
+
+`home` `flame` `bed` `filament` `pause` `play` `menu` `power`
+
+```ini
+btn1_label: HOME
+btn1_icon: home            # icon on top, label in the lower half
+btn4_label: HEAT\n{extruder.temperature}
+btn4_icon: flame
+```
+
+Per page too: `page2_btn1_icon: power`. With `icon:` set, the label moves
+to the lower half of the button (and the icon is centered on top).
+
+The `PAUSE_BUTTON` automatically swaps its icon between `pause` and `play`
+when the printer state changes (only if its icon is one of those two).
+
 ### Automatic PAUSE / RESUME button
 
 A button whose gcode is the special value `PAUSE_BUTTON` toggles

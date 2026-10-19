@@ -109,6 +109,18 @@ class HBTFTButtons:
         self._paused = False
         self._update_timer = None
         self._sent_labels = {}      # (page, btn) -> ultimo label enviado
+        self.icon_names = ['home', 'flame', 'bed', 'filament', 'pause',
+                           'play', 'menu', 'power']
+        self.icon_idx = {}          # (page, btn) -> indice de icono (0=n)
+        for i in range(6):
+            v = config.get('btn%d_icon' % (i + 1), None)
+            if v:
+                self.icon_idx[(1, i)] = self._icon_index(v)
+        for p in range(2, 100):
+            for i in range(6):
+                v = config.get('page%d_btn%d_icon' % (p, i + 1), None)
+                if v:
+                    self.icon_idx[(p, i)] = self._icon_index(v)
         self.printer.register_event_handler('klippy:ready', self._handle_ready)
         self.printer.register_event_handler(
             'klippy:disconnect', self._handle_disconnect)
@@ -172,6 +184,14 @@ class HBTFTButtons:
         return ([r[0] for r in rows], [r[1] for r in rows],
                 [r[2] for r in rows])
 
+    def _icon_index(self, name):
+        try:
+            return self.icon_names.index(name.strip().lower()) + 1
+        except ValueError:
+            logging.warning('hbtft_buttons: icono desconocido %r '
+                            '(validos: %s)', name, ', '.join(self.icon_names))
+            return 0
+
     def _render(self, label):
         # Resuelve plantillas: "HEAT {extruder.temperature}" -> "HEAT 205"
         # Sintaxis: {objeto.campo} con objeto = klippy printer object
@@ -205,13 +225,15 @@ class HBTFTButtons:
         line2 = parts[1] if len(parts) > 1 else ''
         line1 = line1.upper()[:16]
         line2 = line2.upper()[:16]
-        if self.cmd_label2 is not None and (line2 or big):
+        if self.cmd_label2 is not None and (line2 or big
+                                            or self.icon_idx.get((page, i))):
             self.cmd_label2.send(
-                [i, 1 if big else 0] + self._pack(line1)
-                + self._pack(line2) + [color])
+                [i, 1 if big else 0, self.icon_idx.get((page, i), 0)]
+                + self._pack(line1) + self._pack(line2) + [color])
         else:
             self.cmd_label.send([i] + self._pack(line1) + [color])
-        self._sent_labels[(page, i)] = (line1, line2, big)
+        self._sent_labels[(page, i)] = (
+            line1, line2, big, self.icon_idx.get((page, i), 0))
 
     def _send_labels(self):
         # Envia los 6 labels/gcodes/colores de la pagina actual al MCU
@@ -245,11 +267,22 @@ class HBTFTButtons:
                 if not dyn or self.cmd_label is None:
                     continue
                 new_label = self._button_label(self.page, i, labels)
+                # PAUSE_BUTTON con icono pause/play: alternar con el estado
+                if gcodes[i].strip().upper() == 'PAUSE_BUTTON' \
+                        and (self.page, i) in self.icon_idx:
+                    cur = self.icon_idx[(self.page, i)]
+                    want = self.icon_names.index(
+                        'play' if self._paused else 'pause') + 1
+                    if cur in (self.icon_names.index('pause') + 1,
+                               self.icon_names.index('play') + 1):
+                        self.icon_idx[(self.page, i)] = want
                 parts = re.split(r'\\n|\n', new_label, maxsplit=1)
                 l1 = parts[0].upper()[:16]
                 l2 = (parts[1].upper()[:16]) if len(parts) > 1 else ''
                 big = self.big_override.get((self.page, i), self.big_font)
-                if self._sent_labels.get((self.page, i)) == (l1, l2, big):
+                icon = self.icon_idx.get((self.page, i), 0)
+                if self._sent_labels.get((self.page, i)) == (l1, l2, big,
+                                                             icon):
                     continue    # sin cambios: no redibujar
                 self._send_button(i, new_label, colors[i])
         except Exception:
@@ -277,7 +310,7 @@ class HBTFTButtons:
             self.cmd_label = self.mcu.lookup_command(
                 'hb_label idx=%u w0=%u w1=%u w2=%u w3=%u color=%u')
             self.cmd_label2 = self.mcu.try_lookup_command(
-                'hb_label2 idx=%u big=%u w0=%u w1=%u w2=%u w3=%u '
+                'hb_label2 idx=%u big=%u icon=%u w0=%u w1=%u w2=%u w3=%u '
                 'w4=%u w5=%u w6=%u w7=%u color=%u')
             if self.cmd_label2 is None:
                 logging.info('hbtft_buttons: firmware sin hb_label2 '
