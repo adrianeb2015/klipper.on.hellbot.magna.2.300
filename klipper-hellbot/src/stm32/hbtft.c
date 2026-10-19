@@ -273,13 +273,15 @@ hb_draw_label(int i, uint16_t color)
     while (s2[n2] && n2 < 16) n2++;
     uint16_t bx = btn_x(i), by = btn_y(i);
     if (hb_big[i]) {
-        // linea 1 grande (escala 3); centrada sola, arriba si hay 2da linea
+        // ambas lineas grandes (escala 3), centradas en su mitad
         uint16_t y1 = n2 ? (uint16_t)(by + (BTN_H / 2 - 21) / 2 + 4)
                          : (uint16_t)(by + (BTN_H - 21) / 2);
         hb_draw_text(bx + (BTN_W - n1 * 18) / 2, y1, s1, color, 3);
-        if (n2)
-            hb_draw_text(bx + (BTN_W - n2 * 12) / 2, by + BTN_H - 44,
-                         s2, color, 2);
+        if (n2) {
+            uint16_t y2 = (uint16_t)(by + BTN_H / 2
+                                     + (BTN_H / 2 - 21) / 2);
+            hb_draw_text(bx + (BTN_W - n2 * 18) / 2, y2, s2, color, 3);
+        }
     } else if (n2) {
         // dos lineas normales
         hb_draw_text(bx + (BTN_W - n1 * 12) / 2, by + BTN_H / 2 - 20,
