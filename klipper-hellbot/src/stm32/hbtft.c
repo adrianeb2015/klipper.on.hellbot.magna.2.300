@@ -216,9 +216,9 @@ static const uint8_t hb_font5x7[59][5] = {
     {0x61,0x51,0x49,0x45,0x43}  // Z
 };
 
-// Caracter escala 2 (10x14 px)
+// Caracter 5x7 escalable (sc = tamano de pixel: 2 = 10x14, 3 = 15x21)
 static void
-hb_draw_char(uint16_t x, uint16_t y, char c, uint16_t color)
+hb_draw_char(uint16_t x, uint16_t y, char c, uint16_t color, uint8_t sc)
 {
     if (c >= 'a' && c <= 'z')
         c -= 32;
@@ -227,16 +227,16 @@ hb_draw_char(uint16_t x, uint16_t y, char c, uint16_t color)
         uint8_t bits = hb_font5x7[gi][col];
         for (int row = 0; row < 7; row++)
             if (bits & (1 << row))
-                tft_fill_rect(x + col * 2, y + row * 2, 2, 2, color);
+                tft_fill_rect(x + col * sc, y + row * sc, sc, sc, color);
     }
 }
 
 static void
-hb_draw_text(uint16_t x, uint16_t y, const char *s, uint16_t color)
+hb_draw_text(uint16_t x, uint16_t y, const char *s, uint16_t color, uint8_t sc)
 {
     while (*s) {
-        hb_draw_char(x, y, *s++, color);
-        x += 12;
+        hb_draw_char(x, y, *s++, color, sc);
+        x += 6 * sc;
     }
 }
 
@@ -248,6 +248,8 @@ static const uint16_t btn_fill[6] = {
 static char hb_labels[6][17] = {
     "BTN1", "BTN2", "BTN3", "BTN4", "BTN5", "BTN6"
 };
+static char hb_labels2[6][17];         // 2da linea (opcional, vacia = 1 linea)
+static uint8_t hb_big[6];              // 1 = linea 1 en fuente grande (escala 3)
 static uint16_t hb_colors[6] = {
     0x2104, 0x9E86, 0xD220, 0x42B6, 0xB8E6, 0xFFE0
 };
@@ -260,18 +262,38 @@ btn_x(int i) { return BTN_MARGIN + (i % 3) * (BTN_W + BTN_GAP); }
 static uint16_t
 btn_y(int i) { return BTN_MARGIN + (i / 3) * (BTN_H + BTN_GAP); }
 
+// Dibuja el/los labels de un boton, centrados, en el color dado
+static void
+hb_draw_label(int i, uint16_t color)
+{
+    const char *s1 = hb_labels[i];
+    const char *s2 = hb_labels2[i];
+    int n1 = 0, n2 = 0;
+    while (s1[n1] && n1 < 16) n1++;
+    while (s2[n2] && n2 < 16) n2++;
+    uint16_t bx = btn_x(i), by = btn_y(i);
+    if (hb_big[i]) {
+        // linea 1 grande (escala 3) + linea 2 normal
+        hb_draw_text(bx + (BTN_W - n1 * 18) / 2, by + 22, s1, color, 3);
+        hb_draw_text(bx + (BTN_W - n2 * 12) / 2, by + BTN_H - 44, s2, color, 2);
+    } else if (n2) {
+        // dos lineas normales
+        hb_draw_text(bx + (BTN_W - n1 * 12) / 2, by + BTN_H / 2 - 20,
+                     s1, color, 2);
+        hb_draw_text(bx + (BTN_W - n2 * 12) / 2, by + BTN_H / 2 + 8,
+                     s2, color, 2);
+    } else {
+        hb_draw_text(bx + (BTN_W - n1 * 12) / 2, by + (BTN_H - 14) / 2,
+                     s1, color, 2);
+    }
+}
+
 static void
 draw_button_full(int i)
 {
     tft_frame_rect(btn_x(i), btn_y(i), BTN_W, BTN_H
                    , hb_colors[i], 0xFFFF, 3);
-    // label centrado, escala 2 (10x14 por char)
-    const char *s = hb_labels[i];
-    int n = 0;
-    while (s[n] && n < 12) n++;
-    uint16_t tx = btn_x(i) + (BTN_W - n * 12) / 2;
-    uint16_t ty = btn_y(i) + (BTN_H - 14) / 2;
-    hb_draw_text(tx, ty, s, 0x0000);
+    hb_draw_label(i, 0x0000);
 }
 
 // Dibujo progresivo: fondo por bandas + un boton por llamada
@@ -429,14 +451,7 @@ xpt_poll(uint32_t now)
                 btn = idx;
                 // feedback visual: boton invertido 300ms
                 tft_frame_rect(bx, by, BTN_W, BTN_H, 0x0000, 0xFFFF, 3);
-                {
-                    const char *s = hb_labels[btn];
-                    int n = 0;
-                    while (s[n]) n++;
-                    hb_draw_text(btn_x(btn) + (BTN_W - n * 12) / 2
-                                 , btn_y(btn) + (BTN_H - 14) / 2
-                                 , s, 0xFFFF);
-                }
+                hb_draw_label(btn, 0xFFFF);
                 hb_flash_btn = btn;
                 hb_flash_deadline = now + timer_from_us(300000);
             }
@@ -549,15 +564,12 @@ hb_tft_task(void)
 // al conectar, leido de printer.cfg). El texto llega empaquetado en 4
 // uint32 (4 caracteres ASCII por palabra, byte bajo primero) para no
 // depender del soporte de strings del parser.
-void
-command_hb_label(uint32_t *args)
+// Copia 4 palabras uint32 (4 ASCII por palabra, byte bajo primero) a dst
+static void
+hb_unpack(char *dst, uint32_t *args)
 {
-    uint32_t idx = args[0];
-    if (idx > 5)
-        return;
-    char *dst = hb_labels[idx];
     for (int w = 0; w < 4; w++) {
-        uint32_t word = args[1 + w];
+        uint32_t word = args[w];
         dst[w * 4 + 0] = (char)(word & 0xFF);
         dst[w * 4 + 1] = (char)((word >> 8) & 0xFF);
         dst[w * 4 + 2] = (char)((word >> 16) & 0xFF);
@@ -571,11 +583,41 @@ command_hb_label(uint32_t *args)
         if (dst[p] != 0)
             break;
     }
+}
+
+void
+command_hb_label(uint32_t *args)
+{
+    uint32_t idx = args[0];
+    if (idx > 5)
+        return;
+    hb_unpack(hb_labels[idx], &args[1]);
+    hb_labels2[idx][0] = 0;
+    hb_big[idx] = 0;
     hb_colors[idx] = (uint16_t)args[5];
     if (hb_state == HB_DONE)
         draw_button_full(idx);
 }
 DECL_COMMAND(command_hb_label, "hb_label idx=%u w0=%u w1=%u w2=%u w3=%u color=%u");
+
+// Etiqueta extendida: 2 lineas y/o fuente grande (escala 3).
+// big=1: linea 1 en escala 3, linea 2 en escala 2.
+// big=0 y line2 vacia: igual que hb_label.
+void
+command_hb_label2(uint32_t *args)
+{
+    uint32_t idx = args[0];
+    if (idx > 5)
+        return;
+    hb_unpack(hb_labels[idx], &args[2]);
+    hb_unpack(hb_labels2[idx], &args[6]);
+    hb_big[idx] = (uint8_t)args[1];
+    hb_colors[idx] = (uint16_t)args[10];
+    if (hb_state == HB_DONE)
+        draw_button_full(idx);
+}
+DECL_COMMAND(command_hb_label2, "hb_label2 idx=%u big=%u w0=%u w1=%u w2=%u w3=%u w4=%u w5=%u w6=%u w7=%u color=%u");
+
 
 /****************************************************************
  * Comandos de diagnostico desde klippy (consola)

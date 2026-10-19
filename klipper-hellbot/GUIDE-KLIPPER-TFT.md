@@ -187,7 +187,52 @@ Notes:
 
 - `btnN_color` accepts **only** `0xRRGGBB` (raw RGB565 is not accepted: it
   is ambiguous).
-- Labels: up to 16 characters, displayed uppercase.
+- Labels: up to 16 characters per line, displayed uppercase.
+
+### Dynamic labels: live values on a button
+
+A label may contain templates like `{object.field}`, refreshed every
+second by the host module (no firmware rebuild):
+
+```ini
+btn5_label: HEAT {extruder.temperature}
+btn6_label: BED {heater_bed.temperature}
+```
+
+`object` is any klippy printer object with `get_status()` — e.g.
+`extruder`, `heater_bed`, `temperature_sensor ...`. The value is shown as
+an integer. Buttons with templates (and the pause button below) are
+re-rendered once per second and redrawn on the TFT.
+
+### Two-line labels and big font
+
+Labels support a second line using `\n` in the config value, and a big
+font (scale 3, ~15×21 px) for the first line:
+
+```ini
+btn1_label: HEAT\n{extruder.temperature}
+btn2_label: TUNE
+btn2_big_font: True        # first line rendered big
+```
+
+Or globally with `big_font: True` under `[hbtft_buttons]`. Requires the
+`hb_label2` firmware from this fork (older firmware silently falls back to
+single-line labels).
+
+### Automatic PAUSE / RESUME button
+
+A button whose gcode is the special value `PAUSE_BUTTON` toggles
+automatically with the print state:
+
+```ini
+btn3_label: PAUSE          # initial label (overwritten at runtime)
+btn3_gcode: PAUSE_BUTTON
+```
+
+- While printing normally the button reads **PAUSE** and sends `PAUSE`.
+- While paused it reads **RESUME** and sends `RESUME`.
+- The swap happens within ~1 second of the state change, and the button
+  works on any menu page.
 - **Menu pages**: page 1 is the classic `btnN_*` set. Extra pages are
   defined as `pageN_btnM_label/gcode/color` (as many pages as you want).
   A button with gcode `PAGE:N` switches to page N; the host re-sends the 6

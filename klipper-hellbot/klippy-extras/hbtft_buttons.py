@@ -32,6 +32,7 @@
 # With a rough calibration the buttons still work when tapped near the
 # center; adjust min/max until the edges respond correctly.
 import logging
+import re
 
 
 class HBTFTButtons:
@@ -88,6 +89,25 @@ class HBTFTButtons:
         # Resolucion del panel (MKS TFT35 ILI9488, landscape)
         self.tft_w = config.getint('tft_width', 480)
         self.tft_h = config.getint('tft_height', 320)
+        # Dynamic labels: templates like "HEAT {extruder.temperature}"
+        # and the PAUSE_BUTTON auto pause/resume button
+        self.big_font = config.getboolean('big_font', False)
+        # Per-button big font override: btnN_big_font (page 1) and
+        # pageP_btnQ_big_font (extra pages)
+        self.big_override = {}
+        for i in range(6):
+            if config.getboolean('btn%d_big_font' % (i + 1), None) is not None:
+                self.big_override[(1, i)] = config.getboolean(
+                    'btn%d_big_font' % (i + 1))
+        for p in range(2, 100):
+            for i in range(6):
+                v = config.getboolean('page%d_btn%d_big_font' % (p, i + 1),
+                                      None)
+                if v is not None:
+                    self.big_override[(p, i)] = v
+        self._template_re = re.compile(r'\{([a-zA-Z_0-9.]+)\}')
+        self._paused = False
+        self._update_timer = None
         self.printer.register_event_handler('klippy:ready', self._handle_ready)
         self.printer.register_event_handler(
             'klippy:disconnect', self._handle_disconnect)
@@ -97,6 +117,7 @@ class HBTFTButtons:
         self.gcode.register_command(
             'HBTFT_PAGE', self._cmd_hbtft_page,
             desc='Switch the TFT button page (PAGE=N)')
+        self.cmd_label2 = None
 
     def _register_response(self):
         # Estrategia: registrar DIRECTO en serialhdl (mcu._serial), que es
@@ -145,14 +166,70 @@ class HBTFTButtons:
         gcmd.respond_info('hbtft touch debug: %s' % (
             'ON' if self.touch_debug else 'OFF'))
 
+    def _render(self, label):
+        # Resuelve plantillas: "HEAT {extruder.temperature}" -> "HEAT 205"
+        # Sintaxis: {objeto.campo} con objeto = klippy printer object
+        # (extruder, heater_bed, ...) y campo = clave de get_status()
+        def repl(m):
+            parts = m.group(1).split('.', 1)
+            try:
+                obj = self.printer.lookup_object(parts[0])
+                val = obj.get_status(self.reactor.monotonic())[parts[1]]
+                return str(int(val))
+            except Exception:
+                return '??'
+        return self._template_re.sub(repl, label)
+
+    def _button_label(self, page, i, labels):
+        label = self._render(labels[i])
+        if self.pages[page][1][i].strip().upper() == 'PAUSE_BUTTON':
+            label = 'RESUME' if self._paused else 'PAUSE'
+        return label
+
+    def _send_button(self, i, label, color, page=None):
+        if page is None:
+            page = self.page
+        big = self.big_override.get((page, i), self.big_font)
+        line1, _, line2 = label.partition('\n')
+        line1 = line1.upper()[:16]
+        line2 = line2.upper()[:16]
+        if self.cmd_label2 is not None and (line2 or big):
+            self.cmd_label2.send(
+                [i, 1 if big else 0] + self._pack(line1)
+                + self._pack(line2) + [color])
+        else:
+            self.cmd_label.send([i] + self._pack(line1) + [color])
+
     def _send_labels(self):
         # Envia los 6 labels/gcodes/colores de la pagina actual al MCU
         # (el firmware redibuja cada boton al recibir hb_label)
         labels, gcodes, colors = self.pages[self.page]
         for i, label in enumerate(labels):
-            self.cmd_label.send([i] + self._pack(label) + [colors[i]])
+            self._send_button(i, self._button_label(self.page, i, labels),
+                              colors[i])
         logging.info('hbtft_buttons: page %d sent (%s)', self.page,
-                     ', '.join(labels))
+                     ', '.join(self._button_label(self.page, i, labels)
+                               for i in range(6)))
+
+    def _update_dynamic(self, eventtime):
+        # Refresco periodico: botones con plantilla y el PAUSE_BUTTON
+        try:
+            pr = self.printer.lookup_object('pause_resume', None)
+            paused = bool(pr.get_status(eventtime).get('is_paused')) \
+                if pr is not None else False
+            if paused != self._paused:
+                self._paused = paused
+            labels, gcodes, colors = self.pages[self.page]
+            for i in range(6):
+                dyn = '{' in labels[i] \
+                    or gcodes[i].strip().upper() == 'PAUSE_BUTTON'
+                if dyn and self.cmd_label is not None:
+                    self._send_button(
+                        i, self._button_label(self.page, i, labels),
+                        colors[i])
+        except Exception:
+            logging.exception('hbtft_buttons: dynamic update error')
+        return eventtime + 1.0
 
     def _set_page(self, page):
         if page not in self.pages:
@@ -173,8 +250,19 @@ class HBTFTButtons:
             self.mcu = self.printer.lookup_object('mcu')
             self.cmd_label = self.mcu.lookup_command(
                 'hb_label idx=%u w0=%u w1=%u w2=%u w3=%u color=%u')
+            try:
+                self.cmd_label2 = self.mcu.lookup_command(
+                    'hb_label2 idx=%u big=%u w0=%u w1=%u w2=%u w3=%u '
+                    'w4=%u w5=%u w6=%u w7=%u color=%u')
+            except self.printer.lookup_object('gcode').error as e:
+                logging.info('hbtft_buttons: firmware sin hb_label2 '
+                             '(labels de 1 linea): %s', e)
+                self.cmd_label2 = None
             self.page = 1
             self._send_labels()
+            # 1 s timer: refresh dynamic labels (temps, pause/resume)
+            self._update_timer = self.reactor.register_timer(
+                self._update_dynamic, self.reactor.monotonic() + 1.0)
             reg_ok = self._register_response()
             if not reg_ok:
                 logging.warning(
@@ -201,6 +289,9 @@ class HBTFTButtons:
         return [int.from_bytes(raw[w*4:w*4+4], 'little') for w in range(4)]
 
     def _handle_disconnect(self):
+        if self._update_timer is not None:
+            self.reactor.unregister_timer(self._update_timer)
+            self._update_timer = None
         if self._resp_wrapper is not None:
             try:
                 self._resp_wrapper.unregister()
@@ -254,6 +345,8 @@ class HBTFTButtons:
             script = gcodes[btn]
             if not script:
                 return
+            if script.strip().upper() == 'PAUSE_BUTTON':
+                script = 'RESUME' if self._paused else 'PAUSE'
             # Gcode especial: cambiar de pagina de menu
             if script.strip().upper().startswith('PAGE:'):
                 try:
