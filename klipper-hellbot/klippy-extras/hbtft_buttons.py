@@ -209,12 +209,18 @@ class HBTFTButtons:
         # Envia los 6 labels/gcodes/colores de la pagina actual al MCU
         # (el firmware redibuja cada boton al recibir hb_label)
         labels, gcodes, colors = self._page_lists(self.page)
+        sent = []
         for i, label in enumerate(labels):
-            self._send_button(i, self._button_label(self.page, i, labels),
-                              colors[i])
+            try:
+                self._send_button(i, self._button_label(self.page, i, labels),
+                                  colors[i])
+                sent.append(self._button_label(self.page, i, labels))
+            except Exception:
+                logging.exception('hbtft_buttons: error sending button %d '
+                                  '(label=%r gcode=%r color=%r)',
+                                  i + 1, labels[i], gcodes[i], colors[i])
         logging.info('hbtft_buttons: page %d sent (%s)', self.page,
-                     ', '.join(self._button_label(self.page, i, labels)
-                               for i in range(6)))
+                     ', '.join(sent))
 
     def _update_dynamic(self, eventtime):
         # Refresco periodico: botones con plantilla y el PAUSE_BUTTON
