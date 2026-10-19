@@ -185,9 +185,11 @@ class HBTFTButtons:
                 return '??'
         return self._template_re.sub(repl, label)
 
-    def _button_label(self, page, i, labels):
+    def _button_label(self, page, i, labels=None):
+        if labels is None:
+            labels = self._page_lists(page)[0]
         label = self._render(labels[i])
-        if self.pages[page][1][i].strip().upper() == 'PAUSE_BUTTON':
+        if self._page_lists(page)[1][i].strip().upper() == 'PAUSE_BUTTON':
             label = 'RESUME' if self._paused else 'PAUSE'
         return label
 
