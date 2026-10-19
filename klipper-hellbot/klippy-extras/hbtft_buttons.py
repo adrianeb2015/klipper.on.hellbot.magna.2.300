@@ -166,6 +166,11 @@ class HBTFTButtons:
         gcmd.respond_info('hbtft touch debug: %s' % (
             'ON' if self.touch_debug else 'OFF'))
 
+    def _page_lists(self, page):
+        rows = self.pages[page]
+        return ([r[0] for r in rows], [r[1] for r in rows],
+                [r[2] for r in rows])
+
     def _render(self, label):
         # Resuelve plantillas: "HEAT {extruder.temperature}" -> "HEAT 205"
         # Sintaxis: {objeto.campo} con objeto = klippy printer object
@@ -203,7 +208,7 @@ class HBTFTButtons:
     def _send_labels(self):
         # Envia los 6 labels/gcodes/colores de la pagina actual al MCU
         # (el firmware redibuja cada boton al recibir hb_label)
-        labels, gcodes, colors = self.pages[self.page]
+        labels, gcodes, colors = self._page_lists(self.page)
         for i, label in enumerate(labels):
             self._send_button(i, self._button_label(self.page, i, labels),
                               colors[i])
@@ -219,7 +224,7 @@ class HBTFTButtons:
                 if pr is not None else False
             if paused != self._paused:
                 self._paused = paused
-            labels, gcodes, colors = self.pages[self.page]
+            labels, gcodes, colors = self._page_lists(self.page)
             for i in range(6):
                 dyn = '{' in labels[i] \
                     or gcodes[i].strip().upper() == 'PAUSE_BUTTON'
@@ -243,7 +248,8 @@ class HBTFTButtons:
         page = gcmd.get_int('PAGE', 1, minval=1, maxval=99)
         self._set_page(page)
         gcmd.respond_info('hbtft: page %d (%s)' % (
-            self.page, ', '.join(self.pages[self.page][0])))
+            self.page,
+            ', '.join(r[0] for r in self.pages[self.page])))
 
     def _handle_ready(self):
         try:
@@ -339,7 +345,7 @@ class HBTFTButtons:
                 btn = raw_btn
             if btn > 5:
                 return
-            labels, gcodes, colors = self.pages[self.page]
+            labels, gcodes, colors = self._page_lists(self.page)
             script = gcodes[btn]
             if not script:
                 return
