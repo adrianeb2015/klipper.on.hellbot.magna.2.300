@@ -250,14 +250,12 @@ class HBTFTButtons:
             self.mcu = self.printer.lookup_object('mcu')
             self.cmd_label = self.mcu.lookup_command(
                 'hb_label idx=%u w0=%u w1=%u w2=%u w3=%u color=%u')
-            try:
-                self.cmd_label2 = self.mcu.lookup_command(
-                    'hb_label2 idx=%u big=%u w0=%u w1=%u w2=%u w3=%u '
-                    'w4=%u w5=%u w6=%u w7=%u color=%u')
-            except self.printer.lookup_object('gcode').error as e:
+            self.cmd_label2 = self.mcu.try_lookup_command(
+                'hb_label2 idx=%u big=%u w0=%u w1=%u w2=%u w3=%u '
+                'w4=%u w5=%u w6=%u w7=%u color=%u')
+            if self.cmd_label2 is None:
                 logging.info('hbtft_buttons: firmware sin hb_label2 '
-                             '(labels de 1 linea): %s', e)
-                self.cmd_label2 = None
+                             '(labels de una sola linea)')
             self.page = 1
             self._send_labels()
             # 1 s timer: refresh dynamic labels (temps, pause/resume)
