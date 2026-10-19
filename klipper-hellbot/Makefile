@@ -68,7 +68,7 @@ $(OUT)%.ld: %.lds.S $(OUT)autoconf.h
 	@echo "  Preprocessing $@"
 	$(Q)$(CPP) -I$(OUT) -P -MD -MT $@ $< -o $@
 
-$(OUT)klipper.elf: $(OBJS_klipper.elf)
+$(OUT)klipper.elf: $(OBJS_klipper.elf) src/stm32/hbtft_icons_gen.h
 	@echo "  Linking $@"
 	$(Q)$(CC) $(OBJS_klipper.elf) $(CFLAGS_klipper.elf) -o $@
 	$(Q)scripts/check-gcc.sh $@ $(OUT)compile_time_request.o
@@ -129,6 +129,11 @@ all: $(target-y)
 # aplica scripts/update_mks_robin.py sobre out/klipper.bin
 robin: $(OUT)klipper.bin
 	$(Q)$(PYTHON) scripts/update_mks_robin.py $(OUT)klipper.bin $(OUT)Robin_nano35.bin
+
+# Iconos de botones: los PNG de icons/ se convierten a un header C
+# antes de compilar (scripts/png2c.py, solo stdlib).
+src/stm32/hbtft_icons_gen.h: $(wildcard icons/*.png) scripts/png2c.py
+	$(Q)$(PYTHON) scripts/png2c.py -o $@ $(filter %.png,$^)
 	@echo "  FW listo: $(OUT)Robin_nano35.bin (copiar a la SD como Robin_nano35.bin)"
 
 clean:

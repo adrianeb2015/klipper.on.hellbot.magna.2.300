@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+# png2c.py — convert icon PNGs to a C header with monochrome bitmaps.
+#
+# Usage: python3 scripts/png2c.py -o src/stm32/hbtft_icons_gen.h icons/*.png
+#
+# Each PNG becomes: a const bitmap array (1 byte per 8 horizontal pixels,
+# MSB first) plus its name, all collected in hbtft_icons_gen.h as
+#   hb_icons[N][rows][stride], hb_icon_rows, hb_icon_stride,
+#   hb_icon_names[], HB_ICON_COUNT
+#
+# Supported PNG input: 8-bit grayscale, RGB or RGBA, non-interlaced
+# (decoded with the Python stdlib; Pillow is NOT required).
+# A pixel is "on" when its luminance is below 50%.
+import argparse
+import re
+import struct
+import sys
+import zlib
+
+MAX_SIZE = 64  # sanity limit per side
+
+
+def decode_png(data):
+    if data[:8] != b'\x89PNG\r\n\x1a\n':
+        raise ValueError('not a PNG file')
+    pos = 8
+    width = height = bitdepth = color = interlace = None
+    idat = b''
+    while pos < len(data):
+        (length,) = struct.unpack('>I', data[pos:pos + 4])
+        ctype = data[pos + 4:pos + 8]
+        body = data[pos + 8:pos + 8 + length]
+        pos += 12 + length
+        if ctype == b'IHDR':
+            width, height, bitdepth, color, _, _, interlace = \
+                struct.unpack('>IIBBBBB', body)
+        elif ctype == b'IDAT':
+            idat += body
+        elif ctype == b'IEND':
+            break
+    if bitdepth != 8:
+        raise ValueError('unsupported bit depth %d (need 8)' % bitdepth)
+    if interlace:
+        raise ValueError('interlaced PNG not supported')
+    channels = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}.get(color)
+    if channels is None:
+        raise ValueError('unsupported color type %d' % color)
+    if width > MAX_SIZE or height > MAX_SIZE:
+        raise ValueError('image too big (max %dx%d)' % (MAX_SIZE, MAX_SIZE))
+    raw = zlib.decompress(idat)
+    stride_in = width * channels
+    out = []
+    prev = bytearray(stride_in)
+    pos = 0
+    for _ in range(height):
+        ftype = raw[pos]
+        line = bytearray(raw[pos + 1:pos + 1 + stride_in])
+        pos += 1 + stride_in
+        if ftype == 1:      # Sub
+            for i in range(channels, stride_in):
+                line[i] = (line[i] + line[i - channels]) & 0xFF
+        elif ftype == 2:    # Up
+            for i in range(stride_in):
+                line[i] = (line[i] + prev[i]) & 0xFF
+        elif ftype == 3:    # Average
+            for i in range(stride_in):
+                left = line[i - channels] if i >= channels else 0
+                line[i] = (line[i] + ((left + prev[i]) >> 1)) & 0xFF
+        elif ftype == 4:    # Paeth
+            for i in range(stride_in):
+                a = line[i - channels] if i >= channels else 0
+                b = prev[i]
+                c = prev[i - channels] if i >= channels else 0
+                p = a + b - c
+                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                pr = a if (pa <= pb and pa <= pc) else \
+                    (b if pb <= pc else c)
+                line[i] = (line[i] + pr) & 0xFF
+        out.append(bytes(line))
+        prev = line
+    return width, height, color, out
+
+
+def to_bitmap(width, height, color, rows):
+    # luminance; a pixel is ON when dark (ink on transparent/black bg)
+    chans = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}[color]
+    lum_rows = []
+    for line in rows:
+        lum = []
+        for x in range(width):
+            px = line[x * chans:(x + 1) * chans]
+            if color == 6:      # RGBA
+                r, g, b = px[0], px[1], px[2]
+                a = px[3]
+                l = (r + g + b) // 3
+                val = l if a >= 128 else 255    # transparent = empty
+            elif color == 4:    # gray+alpha
+                val = px[0] if px[1] >= 128 else 255
+            elif color == 3:    # palette: treat indexes as luminance
+                val = px[0] * 3
+            else:
+                val = px[0]
+            lum.append(val < 128)
+        lum_rows.append(lum)
+    stride = (width + 7) // 8
+    bitmap = []
+    for r in lum_rows:
+        row_bytes = []
+        for c in range(stride):
+            byte = 0
+            for b in range(8):
+                x = c * 8 + b
+                if x < width and r[x]:
+                    byte |= 0x80 >> b
+            row_bytes.append(byte)
+        bitmap.append(row_bytes)
+    return stride, bitmap
+
+
+def main():
+    ap = argparse.ArgumentParser(description='PNG icons -> C header')
+    ap.add_argument('-o', '--output', required=True)
+    ap.add_argument('inputs', nargs='+')
+    args = ap.parse_args()
+
+    entries = []
+    for path in sorted(args.inputs):
+        name = re.sub(r'[^a-z0-9]', '',
+                      path.rsplit('/', 1)[-1].rsplit('.', 1)[0].lower())
+        if not name:
+            raise SystemExit('bad icon name: %s' % path)
+        width, height, color, rows = decode_png(open(path, 'rb').read())
+        stride, bitmap = to_bitmap(width, height, color, rows)
+        entries.append((name, width, height, stride, bitmap))
+
+    out = ['// GENERATED by scripts/png2c.py — do not edit by hand.',
+           '// Source PNGs live in icons/; rebuilt automatically by make.',
+           '#ifndef HBTFT_ICONS_GEN_H', '#define HBTFT_ICONS_GEN_H', '']
+    for name, width, height, stride, bitmap in entries:
+        out.append('// %s (%dx%d)' % (name, width, height))
+        out.append('static const uint8_t hb_icon_%s[%d * %d] = {'
+                   % (name, height, stride))
+        for row in bitmap:
+            out.append('    ' + ', '.join('0x%02X' % b for b in row) + ',')
+        out.append('};')
+    out.append('')
+    out.append('#define HB_ICON_COUNT %d' % len(entries))
+    out.append('static const char *const hb_icon_names[] = {%s};'
+               % ', '.join('"%s"' % n for n, *_ in entries))
+    out.append('')
+    out.append('// per-icon geometry')
+    out.append('static const uint8_t hb_icon_widths[%d] = {%s};'
+               % (len(entries), ', '.join(str(w) for _, w, *_ in entries)))
+    out.append('static const uint8_t hb_icon_heights[%d] = {%s};'
+               % (len(entries), ', '.join(str(h) for _, _, h, *_ in entries)))
+    out.append('static const uint8_t hb_icon_strides[%d] = {%s};'
+               % (len(entries), ', '.join(str(e[3]) for e in entries)))
+    out.append('')
+    out.append('// per-icon bitmap pointers (icon index 1..N)')
+    out.append('static const uint8_t *const hb_icon_bitmaps[%d] = {%s};'
+               % (len(entries),
+                  ', '.join('hb_icon_%s' % n for n, *_ in entries)))
+    out.append('')
+    out.append('#endif  // HBTFT_ICONS_GEN_H')
+    open(args.output, 'w').write('\n'.join(out) + '\n')
+    print('png2c: %d iconos -> %s' % (len(entries), args.output))
+
+
+if __name__ == '__main__':
+    main()

@@ -109,8 +109,10 @@ class HBTFTButtons:
         self._paused = False
         self._update_timer = None
         self._sent_labels = {}      # (page, btn) -> ultimo label enviado
-        self.icon_names = ['home', 'flame', 'bed', 'filament', 'pause',
-                           'play', 'menu', 'power']
+        # NOTE: order must match scripts/png2c.py (alphabetical by
+        # PNG filename, the single source of truth)
+        self.icon_names = ['bed', 'filament', 'flame', 'home', 'menu',
+                           'pause', 'play', 'power']
         self.icon_idx = {}          # (page, btn) -> indice de icono (0=n)
         for i in range(6):
             v = config.get('btn%d_icon' % (i + 1), None)

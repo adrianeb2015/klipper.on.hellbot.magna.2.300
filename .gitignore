@@ -18,3 +18,4 @@ Thumbs.db
 marlin/
 mks-robin-nano/
 configurations/
+src/stm32/hbtft_icons_gen.h
