@@ -108,6 +108,7 @@ class HBTFTButtons:
         self._template_re = re.compile(r'\{([a-zA-Z_0-9.]+)\}')
         self._paused = False
         self._update_timer = None
+        self._sent_labels = {}      # (page, btn) -> ultimo label enviado
         self.printer.register_event_handler('klippy:ready', self._handle_ready)
         self.printer.register_event_handler(
             'klippy:disconnect', self._handle_disconnect)
@@ -210,6 +211,7 @@ class HBTFTButtons:
                 + self._pack(line2) + [color])
         else:
             self.cmd_label.send([i] + self._pack(line1) + [color])
+        self._sent_labels[(page, i)] = (line1, line2, big)
 
     def _send_labels(self):
         # Envia los 6 labels/gcodes/colores de la pagina actual al MCU
@@ -240,10 +242,16 @@ class HBTFTButtons:
             for i in range(6):
                 dyn = '{' in labels[i] \
                     or gcodes[i].strip().upper() == 'PAUSE_BUTTON'
-                if dyn and self.cmd_label is not None:
-                    self._send_button(
-                        i, self._button_label(self.page, i, labels),
-                        colors[i])
+                if not dyn or self.cmd_label is None:
+                    continue
+                new_label = self._button_label(self.page, i, labels)
+                parts = re.split(r'\\n|\n', new_label, maxsplit=1)
+                l1 = parts[0].upper()[:16]
+                l2 = (parts[1].upper()[:16]) if len(parts) > 1 else ''
+                big = self.big_override.get((self.page, i), self.big_font)
+                if self._sent_labels.get((self.page, i)) == (l1, l2, big):
+                    continue    # sin cambios: no redibujar
+                self._send_button(i, new_label, colors[i])
         except Exception:
             logging.exception('hbtft_buttons: dynamic update error')
         return eventtime + 1.0
