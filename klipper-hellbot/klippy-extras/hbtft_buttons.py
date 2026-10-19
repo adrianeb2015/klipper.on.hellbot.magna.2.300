@@ -197,7 +197,11 @@ class HBTFTButtons:
         if page is None:
             page = self.page
         big = self.big_override.get((page, i), self.big_font)
-        line1, _, line2 = label.partition('\n')
+        # Line break: a real newline or the two-char literal backslash+n
+        # (printer.cfg does not interpret escapes; user writes HEAT\n21)
+        parts = re.split(r'\\n|\n', label, maxsplit=1)
+        line1 = parts[0]
+        line2 = parts[1] if len(parts) > 1 else ''
         line1 = line1.upper()[:16]
         line2 = line2.upper()[:16]
         if self.cmd_label2 is not None and (line2 or big):
