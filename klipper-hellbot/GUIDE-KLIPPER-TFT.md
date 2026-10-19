@@ -226,6 +226,13 @@ are compiled into the firmware — zero protocol traffic, instant drawing:
 
 `home` `flame` `bed` `filament` `pause` `play` `menu` `power`
 
+The icons live as PNG files in [`icons/`](icons/) and are converted to a C
+header **automatically at build time** by `scripts/png2c.py` (pure Python
+stdlib, no Pillow). To add or change an icon: drop a 16×16 PNG in `icons/`
+(dark pixels = ink, transparent/white = background) and rebuild with
+`make robin`. Icon names are the PNG file names; keep them in sync with
+the list in `klippy-extras/hbtft_buttons.py` (`icon_names`).
+
 ```ini
 btn1_label: HOME
 btn1_icon: home            # icon on top, label in the lower half
